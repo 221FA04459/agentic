@@ -1,0 +1,11 @@
+*.py[cod]
+
+# Reports and temp uploads
+reports/
+temp_uploads/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

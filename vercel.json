@@ -1,0 +1,9 @@
+{
+  "buildCommand": "",
+  "installCommand": "pip install -r requirements_minimal.txt",
+  "routes": [
+    { "src": "/(.*)", "dest": "api/index.py" }
+  ]
+}
+
+
