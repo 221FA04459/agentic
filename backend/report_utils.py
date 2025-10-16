@@ -9,7 +9,7 @@ import os
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import cm
-import pandas as pd
+import xlsxwriter
 
 
 class ReportGenerator:
@@ -217,47 +217,54 @@ class ReportGenerator:
         c.save()
 
     def _build_xlsx(self, path: str, reg: Dict[str, Any], checks: List[Dict[str, Any]]) -> None:
-        with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
-            meta = pd.DataFrame(
-                {
-                    "field": ["id", "filename", "type", "jurisdiction", "uploaded"],
-                    "value": [
-                        reg.get("id"),
-                        reg.get("filename"),
-                        reg.get("regulation_type"),
-                        reg.get("jurisdiction"),
-                        reg.get("upload_date"),
-                    ],
-                }
-            )
-            meta.to_excel(writer, index=False, sheet_name="Regulation")
+        workbook = xlsxwriter.Workbook(path)
+        try:
+            # Sheet: Regulation
+            ws_meta = workbook.add_worksheet("Regulation")
+            headers = ["field", "value"]
+            for col, h in enumerate(headers):
+                ws_meta.write(0, col, h)
+            meta_rows = [
+                ("id", reg.get("id")),
+                ("filename", reg.get("filename")),
+                ("type", reg.get("regulation_type")),
+                ("jurisdiction", reg.get("jurisdiction")),
+                ("uploaded", reg.get("upload_date")),
+            ]
+            for r, (k, v) in enumerate(meta_rows, start=1):
+                ws_meta.write(r, 0, k)
+                ws_meta.write(r, 1, v)
 
-            rows = []
+            # Sheet: Checks
+            ws_checks = workbook.add_worksheet("Checks")
+            checks_headers = ["check_id", "score", "status"]
+            for col, h in enumerate(checks_headers):
+                ws_checks.write(0, col, h)
+            row_idx = 1
             for chk in checks:
-                res = chk.get("result", {})
-                rows.append(
-                    {
-                        "check_id": chk.get("id"),
-                        "score": res.get("compliance_score"),
-                        "status": res.get("overall_status"),
-                    }
-                )
-            pd.DataFrame(rows).to_excel(writer, index=False, sheet_name="Checks")
+                res = chk.get("result") or chk.get("compliance_result") or {}
+                ws_checks.write(row_idx, 0, chk.get("id"))
+                ws_checks.write(row_idx, 1, res.get("compliance_score"))
+                ws_checks.write(row_idx, 2, res.get("overall_status"))
+                row_idx += 1
 
-            gaps_rows = []
+            # Sheet: Gaps
+            ws_gaps = workbook.add_worksheet("Gaps")
+            gaps_headers = ["check_id", "requirement", "gap", "impact", "effort"]
+            for col, h in enumerate(gaps_headers):
+                ws_gaps.write(0, col, h)
+            row_idx = 1
             for chk in checks:
                 res = chk.get("result") or chk.get("compliance_result") or {}
                 for g in res.get("gaps", []):
-                    gaps_rows.append(
-                        {
-                            "check_id": chk.get("id"),
-                            "requirement": g.get("requirement"),
-                            "gap": g.get("gap_description"),
-                            "impact": g.get("impact_level"),
-                            "effort": g.get("remediation_effort"),
-                        }
-                    )
-            pd.DataFrame(gaps_rows).to_excel(writer, index=False, sheet_name="Gaps")
+                    ws_gaps.write(row_idx, 0, chk.get("id"))
+                    ws_gaps.write(row_idx, 1, g.get("requirement"))
+                    ws_gaps.write(row_idx, 2, g.get("gap_description"))
+                    ws_gaps.write(row_idx, 3, g.get("impact_level"))
+                    ws_gaps.write(row_idx, 4, g.get("remediation_effort"))
+                    row_idx += 1
+        finally:
+            workbook.close()
 
 
 
