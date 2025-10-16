@@ -9,7 +9,6 @@ services:
     autoDeploy: true
     envVars:
       - key: GEMINI_API_KEY
-        value: AIzaSyD_ILxOPbYAcMPch2OvIUhLGT3a8GHa8hg
         sync: false
       - key: COMPLIANCE_DB_PATH
         value: compliance.db
@@ -21,7 +20,7 @@ services:
     env: python
     rootDir: .
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements_ui.txt
     startCommand: streamlit run frontend/app.py --server.port $PORT --server.address 0.0.0.0
     autoDeploy: true
     envVars:
