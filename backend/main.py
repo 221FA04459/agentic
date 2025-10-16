@@ -38,8 +38,12 @@ app = FastAPI(
 # Load environment variables from .env if present
 load_dotenv()
 init_db()
-scheduler = BackgroundScheduler()
-scheduler.start()
+# Disable background scheduler on serverless runtimes
+IS_SERVERLESS = bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
+scheduler = None
+if not IS_SERVERLESS:
+    scheduler = BackgroundScheduler()
+    scheduler.start()
 
 app.add_middleware(
     CORSMiddleware,
@@ -49,7 +53,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-agent = ComplianceAgent()
+# Lazy init agent; fail fast if missing key
+agent = None
+try:
+    agent = ComplianceAgent()
+except Exception as e:
+    logger.warning(f"ComplianceAgent not initialized: {e}")
 reporter = ReportGenerator()
 
 # Legacy in-memory stores (kept for backward compatibility if needed)
@@ -66,7 +75,15 @@ class APIResponse(BaseModel):
 
 @app.get("/", response_model=APIResponse)
 async def health():
-    return APIResponse(success=True, message="OK", data={"timestamp": datetime.utcnow().isoformat()})
+    return APIResponse(
+        success=True,
+        message="OK",
+        data={
+            "timestamp": datetime.utcnow().isoformat(),
+            "serverless": IS_SERVERLESS,
+            "agent_ready": agent is not None,
+        },
+    )
 
 
 @app.post("/upload_regulation", response_model=APIResponse)
