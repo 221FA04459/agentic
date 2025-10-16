@@ -17,7 +17,7 @@ from .models import ComplianceCheck, ComplianceReport, RegulationDocument
 from .compliance_agent import ComplianceAgent
 from .report_utils import ReportGenerator
 from dotenv import load_dotenv
-from .db import init_db, get_session, engine
+from .db import init_db, get_session, engine, DB_PATH, DATABASE_URL, IS_SERVERLESS as DB_IS_SERVERLESS
 from .schemas import Regulation as RegulationRow, ComplianceCheckRow, ReportRow, Source, SourceVersion
 from sqlmodel import Session, select
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -53,12 +53,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Lazy init agent; fail fast if missing key
+"""
+Agent initialization strategy:
+- We attempt to initialize at startup but do not fail the server if the key is missing.
+- Endpoints use `get_agent()` which lazy-initializes and returns a 503 if unavailable.
+This prevents serverless cold starts from crashing and returns a clear error instead
+of generic FUNCTION_INVOCATION_FAILED when GEMINI_API_KEY is not set.
+"""
 agent = None
 try:
     agent = ComplianceAgent()
 except Exception as e:
     logger.warning(f"ComplianceAgent not initialized: {e}")
+
+
+def get_agent() -> ComplianceAgent:
+    """Return a ready ComplianceAgent or raise HTTP 503 if not configured."""
+    global agent
+    if agent is None:
+        try:
+            agent = ComplianceAgent()
+        except Exception as e:  # missing key or dependency
+            raise HTTPException(status_code=503, detail=f"AI model not configured: {e}")
+    return agent
 reporter = ReportGenerator()
 
 # Legacy in-memory stores (kept for backward compatibility if needed)
@@ -82,6 +99,54 @@ async def health():
             "timestamp": datetime.utcnow().isoformat(),
             "serverless": IS_SERVERLESS,
             "agent_ready": agent is not None,
+        },
+    )
+
+
+@app.get("/health/details", response_model=APIResponse)
+async def health_details():
+    """Detailed, safe diagnostics for deployment health without exposing secrets."""
+    agent_ready = False
+    agent_error = None
+    try:
+        _ = get_agent()
+        agent_ready = True
+    except HTTPException as e:
+        agent_error = e.detail
+    except Exception as e:  # pragma: no cover
+        agent_error = str(e)
+
+    # Writable directories
+    tmp_dir = "/tmp"
+    can_write_tmp = os.access(tmp_dir, os.W_OK)
+    reports_dir = "/tmp/reports" if IS_SERVERLESS else "reports"
+    reports_exists = os.path.isdir(reports_dir)
+
+    # Optional dependency versions
+    versions: Dict[str, Any] = {}
+    try:
+        import fastapi  # type: ignore
+        versions["fastapi"] = getattr(fastapi, "__version__", "unknown")
+    except Exception:
+        pass
+    try:
+        import google.generativeai as genai  # type: ignore
+        versions["google-generativeai"] = getattr(genai, "__version__", "unknown")
+    except Exception:
+        versions["google-generativeai"] = "not_installed"
+
+    return APIResponse(
+        success=True,
+        message="OK",
+        data={
+            "timestamp": datetime.utcnow().isoformat(),
+            "serverless_flags": {"main": IS_SERVERLESS, "db": DB_IS_SERVERLESS, "VERCEL_env": bool(os.getenv("VERCEL"))},
+            "agent_ready": agent_ready,
+            "agent_error": agent_error,
+            "database": {"path": DB_PATH, "url": DATABASE_URL},
+            "storage": {"tmp_writable": can_write_tmp, "reports_dir": reports_dir, "reports_exists": reports_exists},
+            "python_version": os.getenv("PYTHON_VERSION") or "unknown",
+            "versions": versions,
         },
     )
 
@@ -139,8 +204,9 @@ async def _process_regulation_document(
     effective_date: Optional[str],
 ):
     try:
-        extracted_text = await agent.extract_document_text(file_path)
-        analysis = await agent.analyze_regulation(extracted_text, regulation_type, jurisdiction)
+        ag = get_agent()
+        extracted_text = await ag.extract_document_text(file_path)
+        analysis = await ag.analyze_regulation(extracted_text, regulation_type, jurisdiction)
 
         doc = RegulationDocument(
             id=regulation_id,
@@ -205,7 +271,8 @@ async def check_compliance(payload: ComplianceCheck, session: Session = Depends(
         if reg.get("status") != "processed":
             raise HTTPException(status_code=400, detail="Regulation not processed yet")
 
-        result = await agent.check_compliance(
+        ag = get_agent()
+        result = await ag.check_compliance(
             regulation_text=reg["extracted_text"],
             company_policies=payload.company_policies,
             regulation_analysis=reg["analysis_result"],
@@ -309,15 +376,23 @@ async def get_report(regulation_id: str, format: str = "pdf", session: Session =
             filename = f"compliance_report_{regulation_id}.{latest.format}"
             return FileResponse(latest.file_path, media_type=media_type, filename=filename)
 
-    # 2. Auto-generate if missing
-    payload = ComplianceReport(regulation_id=regulation_id, include_recommendations=True)
+    # 2. Auto-generate if missing, but only if we have regulation data
+    reg = regulations_db.get(regulation_id)
+    if not reg:
+        db_reg = session.exec(select(RegulationRow).where(RegulationRow.id == regulation_id)).first()
+        if db_reg:
+            reg = db_reg.__dict__
+    if not reg:
+        raise HTTPException(status_code=404, detail="Regulation not found")
+
     path = await reporter.generate_report(
-        regulation_data=regulations_db.get(regulation_id) or {},
+        regulation_data=reg,
         compliance_checks=[c for c in compliance_checks_db.values() if c["regulation_id"] == regulation_id],
         report_format=format,
         include_recommendations=True,
     )
-    return FileResponse(path, media_type="application/pdf", filename=f"compliance_report_{regulation_id}.pdf")
+    media_type = "application/pdf" if format == "pdf" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return FileResponse(path, media_type=media_type, filename=f"compliance_report_{regulation_id}.{format}")
 
 
 @app.get("/regulations", response_model=APIResponse)
@@ -451,7 +526,8 @@ async def fetch_and_check_source(session: Session, src: Source):
         # auto-create regulation entry for diff (simple: store as txt)
         reg_id = str(uuid.uuid4())
         extracted_text = content[:10000]
-        analysis = await agent.analyze_regulation(extracted_text, src.regulation_type, src.jurisdiction)
+        ag = get_agent()
+        analysis = await ag.analyze_regulation(extracted_text, src.regulation_type, src.jurisdiction)
         doc = RegulationDocument(
             id=reg_id,
             filename=f"monitor_{src.name}.txt",
