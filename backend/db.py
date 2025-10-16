@@ -7,7 +7,10 @@ from sqlmodel import SQLModel, create_engine, Session
 import os
 
 
-DB_PATH = os.getenv("COMPLIANCE_DB_PATH", "compliance.db")
+# Use /tmp on serverless (e.g., Vercel) because filesystem is read-only elsewhere
+IS_SERVERLESS = bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
+default_db_path = "/tmp/compliance.db" if IS_SERVERLESS else "compliance.db"
+DB_PATH = os.getenv("COMPLIANCE_DB_PATH", default_db_path)
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 # check_same_thread False to allow usage in async context (FastAPI)
