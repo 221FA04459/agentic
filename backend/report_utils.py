@@ -24,7 +24,8 @@ class ReportGenerator:
         out_dir = "/tmp/reports" if os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME") else "reports"
         os.makedirs(out_dir, exist_ok=True)
         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        base_name = f"report_{regulation_data['id']}_{ts}"
+        reg_id = regulation_data.get("id") or "unknown"
+        base_name = f"report_{reg_id}_{ts}"
         if report_format == "pdf":
             path = os.path.join(out_dir, base_name + ".pdf")
             self._build_pdf(path, regulation_data, compliance_checks, include_recommendations)
