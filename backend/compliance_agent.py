@@ -8,7 +8,10 @@ import logging
 from typing import Dict, List, Any, Optional
 
 from dotenv import load_dotenv
-import pdfplumber
+try:
+    import pdfplumber  # optional, may be omitted in serverless
+except Exception:  # pragma: no cover
+    pdfplumber = None
 import PyPDF2
 import docx
 logger = logging.getLogger(__name__)
@@ -32,17 +35,19 @@ class ComplianceAgent:
     async def extract_document_text(self, file_path: str) -> str:
         ext = file_path.lower().split(".")[-1]
         if ext == "pdf":
-            try:
-                text = ""
-                with pdfplumber.open(file_path) as pdf:
-                    for p in pdf.pages:
-                        t = p.extract_text() or ""
-                        if t:
-                            text += t + "\n"
-                if text.strip():
-                    return text.strip()
-            except Exception:
-                pass
+            # Prefer pdfplumber if available; otherwise fall back to PyPDF2
+            if pdfplumber is not None:
+                try:
+                    text = ""
+                    with pdfplumber.open(file_path) as pdf:
+                        for p in pdf.pages:
+                            t = p.extract_text() or ""
+                            if t:
+                                text += t + "\n"
+                    if text.strip():
+                        return text.strip()
+                except Exception:
+                    pass
             with open(file_path, "rb") as f:
                 reader = PyPDF2.PdfReader(f)
                 return "\n".join([p.extract_text() or "" for p in reader.pages]).strip()
