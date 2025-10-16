@@ -20,15 +20,17 @@ class ReportGenerator:
         report_format: str = "pdf",
         include_recommendations: bool = True,
     ) -> str:
-        os.makedirs("reports", exist_ok=True)
+        # In serverless (e.g., Vercel) write to /tmp
+        out_dir = "/tmp/reports" if os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME") else "reports"
+        os.makedirs(out_dir, exist_ok=True)
         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         base_name = f"report_{regulation_data['id']}_{ts}"
         if report_format == "pdf":
-            path = os.path.join("reports", base_name + ".pdf")
+            path = os.path.join(out_dir, base_name + ".pdf")
             self._build_pdf(path, regulation_data, compliance_checks, include_recommendations)
             return path
         if report_format == "xlsx":
-            path = os.path.join("reports", base_name + ".xlsx")
+            path = os.path.join(out_dir, base_name + ".xlsx")
             self._build_xlsx(path, regulation_data, compliance_checks)
             return path
         raise ValueError("Unsupported format. Use 'pdf' or 'xlsx'.")
