@@ -1,6 +1,6 @@
 {
   "buildCommand": "",
-  "installCommand": "pip install -r requirements_api.txt",
+  "installCommand": "pip install -r api/requirements.txt",
   "routes": [
     { "src": "/(.*)", "dest": "api/index.py" }
   ]
