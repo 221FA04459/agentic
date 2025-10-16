@@ -9,6 +9,7 @@ services:
     autoDeploy: true
     envVars:
       - key: GEMINI_API_KEY
+        value: AIzaSyD_ILxOPbYAcMPch2OvIUhLGT3a8GHa8hg
         sync: false
       - key: COMPLIANCE_DB_PATH
         value: compliance.db
