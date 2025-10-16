@@ -490,4 +490,11 @@ def schedule_job():
     logger.info(f"Scheduled monitor tick. {len(rows)} sources configured")
 
 
-scheduler.add_job(schedule_job, "interval", minutes=30, id="monitor_tick", replace_existing=True)
+if scheduler is not None:
+    scheduler.add_job(
+        schedule_job,
+        "interval",
+        minutes=30,
+        id="monitor_tick",
+        replace_existing=True,
+    )
