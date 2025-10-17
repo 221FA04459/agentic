@@ -50,7 +50,7 @@ with tab1:
             files = {"file": (uploaded.name, uploaded.getvalue(), uploaded.type)}
             data = {"regulation_type": reg_type, "jurisdiction": jurisdiction, "effective_date": effective_date}
             with st.spinner("Uploading and processing..."):
-                r = requests.post(f"{api_base}/upload_regulation", files=files, data=data, timeout=300)
+                r = requests.post(f"{api_base}/upload_regulation", files=files, data=data, timeout=600)
             if r.ok:
                 res = r.json()
                 st.success("Uploaded. Background processing started.")
@@ -61,14 +61,18 @@ with tab1:
     st.divider()
     st.subheader("Existing Regulations")
     if st.button("Refresh Regulations"):
-        r = requests.get(f"{api_base}/regulations", timeout=60)
-        if r.ok:
-            data = r.json().get("data", {})
-            items = data.get("items", [])
-            st.write(f"Found {len(items)} item(s)")
-            st.json(items)
-        else:
-            st.error(r.text)
+        try:
+            with st.spinner("Contacting API (may take up to 2 minutes on cold start)..."):
+                r = requests.get(f"{api_base}/regulations", timeout=180)
+            if r.ok:
+                data = r.json().get("data", {})
+                items = data.get("items", [])
+                st.write(f"Found {len(items)} item(s)")
+                st.json(items)
+            else:
+                st.error(r.text)
+        except requests.exceptions.ReadTimeout:
+            st.error("Timed out waiting for the API. If this is the first request after a while, the service may be cold starting. Please try again in a few seconds.")
 
 # -----------------------------
 # Tab 2: Compliance Check
@@ -88,7 +92,7 @@ with tab2:
                 "company_policies": [p.strip() for p in policies_text.split("\n") if p.strip()]
             }
             with st.spinner("Assessing compliance..."):
-                r = requests.post(f"{api_base}/check_compliance", json=payload, timeout=300)
+                r = requests.post(f"{api_base}/check_compliance", json=payload, timeout=600)
             if r.ok:
                 res = r.json().get("data", {})
                 st.success("Compliance check complete")
@@ -147,7 +151,7 @@ with tab3:
         else:
             payload = {"regulation_id": reg_id_r, "include_recommendations": include_recs}
             with st.spinner("Generating professional PDF..."):
-                resp = requests.post(f"{api_base}/generate_professional_report", json=payload, timeout=300)
+                resp = requests.post(f"{api_base}/generate_professional_report", json=payload, timeout=600)
 
             if resp.ok:
                 pdf_bytes = resp.content
@@ -202,18 +206,24 @@ with tab4:
     col_a, col_b = st.columns(2)
     with col_a:
         if st.button("Refresh Sources", key="m_list"):
-            r = requests.get(f"{api_base}/monitor/sources", timeout=60)
-            if r.ok:
-                data = r.json().get("data", {})
-                items = data.get("items", [])
-                st.write(f"{len(items)} source(s)")
-                st.json(items)
-            else:
-                st.error(r.text)
+            try:
+                r = requests.get(f"{api_base}/monitor/sources", timeout=180)
+                if r.ok:
+                    data = r.json().get("data", {})
+                    items = data.get("items", [])
+                    st.write(f"{len(items)} source(s)")
+                    st.json(items)
+                else:
+                    st.error(r.text)
+            except requests.exceptions.ReadTimeout:
+                st.error("Timed out waiting for sources. Please retry; the API may be cold starting.")
     with col_b:
         if st.button("Run Monitor Now", key="m_run"):
-            r = requests.post(f"{api_base}/monitor/run", timeout=120)
-            if r.ok:
-                st.success(r.json())
-            else:
-                st.error(r.text)
+            try:
+                r = requests.post(f"{api_base}/monitor/run", timeout=300)
+                if r.ok:
+                    st.success(r.json())
+                else:
+                    st.error(r.text)
+            except requests.exceptions.ReadTimeout:
+                st.error("Timed out running monitor. Try again in a moment.")
